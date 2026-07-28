@@ -1,0 +1,133 @@
+QWidget {
+    background-color: #111111;
+    color: #e7e7e7;
+    selection-background-color: #f2f2f2;
+    selection-color: #111111;
+    font-family: "Adwaita Sans";
+}
+
+QMainWindow {
+    background-color: #111111;
+}
+
+QTabWidget::pane {
+    background-color: #111111;
+    border: none;
+    top: -2px;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: #a8a8a8;
+    border: none;
+    border-radius: 4px;
+    padding: 7px 14px;
+    margin: 3px 2px;
+    min-width: 50px;
+}
+
+QTabBar::tab:selected {
+    background-color: #f2f2f2;
+    color: #111111;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #292929;
+    color: #ffffff;
+}
+
+QPushButton {
+    background-color: #1b1b1b;
+    color: #e7e7e7;
+    border: none;
+    border-radius: 4px;
+    padding: 9px 12px;
+    min-height: 20px;
+}
+
+QPushButton:hover {
+    background-color: #292929;
+    color: #ffffff;
+}
+
+QPushButton:pressed {
+    background-color: #f2f2f2;
+    color: #111111;
+}
+
+QPushButton#screenCard {
+    background-color: #1b1b1b;
+    color: #e7e7e7;
+    border: 2px solid #444444;
+    border-radius: 12px;
+    padding: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QPushButton#screenCard:hover {
+    background-color: #222222;
+    border-color: #f2f2f2;
+}
+
+QPushButton#screenCard:pressed {
+    background-color: #f2f2f2;
+    border-color: #ffffff;
+    color: #111111;
+}
+
+QPushButton#windowCard {
+    background-color: #1b1b1b;
+    color: #e7e7e7;
+    border: 1px solid #444444;
+    border-top: 7px solid #292929;
+    border-radius: 8px;
+    padding: 7px 10px 8px 10px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+QPushButton#windowCard:hover {
+    background-color: #222222;
+    border-color: #f2f2f2;
+    border-top-color: #f2f2f2;
+}
+
+QPushButton#windowCard:pressed {
+    background-color: #f2f2f2;
+    color: #111111;
+}
+
+QCheckBox {
+    spacing: 8px;
+    color: #a8a8a8;
+}
+
+QCheckBox::indicator {
+    width: 15px;
+    height: 15px;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    background-color: #1b1b1b;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #f2f2f2;
+    border-color: #f2f2f2;
+}
+
+QScrollArea,
+QAbstractScrollArea,
+QAbstractScrollArea::viewport {
+    background-color: #111111;
+    border: none;
+}
+
+QToolTip {
+    background-color: #0d0d0d;
+    color: #e7e7e7;
+    border: none;
+    border-radius: 5px;
+    padding: 6px;
+}

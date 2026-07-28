@@ -1,0 +1,4 @@
+[Icon Theme]
+Name=Default
+Comment=Use the macOS-inspired Capitaine cursor theme
+Inherits=capitaine-cursors

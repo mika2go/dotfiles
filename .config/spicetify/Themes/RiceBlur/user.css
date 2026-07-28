@@ -1,0 +1,195 @@
+:root {
+    --rice-glass: rgba(12, 15, 23, 0.52);
+    --rice-glass-strong: rgba(12, 15, 23, 0.72);
+    --rice-glass-soft: rgba(255, 255, 255, 0.045);
+    --rice-border: rgba(255, 255, 255, 0.075);
+    --rice-shadow: 0 18px 55px rgba(0, 0, 0, 0.28);
+    --rice-blur: blur(22px) saturate(1.15);
+}
+
+html {
+    background: var(--spice-main);
+}
+
+body {
+    position: relative;
+    isolation: isolate;
+    background: transparent !important;
+}
+
+body::before,
+body::after {
+    content: "";
+    position: fixed;
+    pointer-events: none;
+    inset: 0;
+}
+
+body::before {
+    z-index: 0;
+    inset: -34px;
+    background: var(--spice-main) url("./wallpaper-current.jpg") center / cover no-repeat;
+    filter: blur(28px) saturate(1.12) brightness(0.55);
+    transform: scale(1.035);
+}
+
+body::after {
+    z-index: 0;
+    background:
+        radial-gradient(circle at 78% 10%, color-mix(in srgb, var(--spice-button) 18%, transparent), transparent 42%),
+        linear-gradient(145deg, rgba(7, 9, 14, 0.45), rgba(7, 9, 14, 0.64));
+}
+
+#main,
+.Root,
+.Root__top-container,
+.Root__main-view,
+.main-view-container,
+.main-view-container__scroll-node,
+.main-view-container__scroll-node-child,
+[class*="Root__"],
+[class*="main-view-container"],
+[data-overlayscrollbars-viewport] {
+    background-color: transparent !important;
+}
+
+#main {
+    position: relative;
+    z-index: 1;
+}
+
+.Root__nav-bar,
+.Root__right-sidebar,
+.Root__now-playing-bar,
+aside,
+nav[aria-label] {
+    background: var(--rice-glass) !important;
+    border-color: var(--rice-border) !important;
+    box-shadow: var(--rice-shadow);
+    backdrop-filter: var(--rice-blur);
+    -webkit-backdrop-filter: var(--rice-blur);
+}
+
+.Root__nav-bar,
+.Root__right-sidebar {
+    margin: 8px;
+    border: 1px solid var(--rice-border);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.Root__now-playing-bar {
+    margin: 0 8px 8px;
+    border: 1px solid var(--rice-border);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.main-home-homeHeader,
+.main-actionBarBackground-background,
+.main-entityHeader-backgroundColor,
+.main-entityHeader-overlay,
+.main-entityHeader-background,
+[class*="backgroundColor"],
+[class*="Header__background"] {
+    background: transparent !important;
+}
+
+.main-card-card,
+.main-card-cardContainer,
+.main-trackList-trackListRow,
+.main-contextMenu-menu,
+.main-userWidget-box,
+[class*="Card"],
+[class*="card"] {
+    border-color: transparent;
+}
+
+.main-card-card,
+.main-card-cardContainer,
+.main-contextMenu-menu,
+.main-userWidget-box {
+    background: var(--rice-glass-soft) !important;
+    border: 1px solid var(--rice-border);
+    backdrop-filter: blur(12px) saturate(1.08);
+    -webkit-backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.main-card-card:hover,
+.main-card-cardContainer:hover,
+.main-trackList-trackListRow:hover,
+.main-trackList-selected {
+    background: color-mix(in srgb, var(--spice-button) 13%, rgba(255, 255, 255, 0.055)) !important;
+}
+
+/* Flying controls: keep hit areas, remove every visible wrapper box. */
+button[data-is-icon-only="true"],
+button[data-testid="play-button"],
+button[data-testid="control-button-playpause"],
+.main-playButton-PlayButton,
+.main-card-PlayButtonContainer,
+.view-homeShortcutsGrid-PlayButtonContainer {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+}
+
+button[data-is-icon-only="true"],
+button[data-testid="play-button"],
+button[data-testid="control-button-playpause"],
+.main-playButton-PlayButton {
+    background: transparent !important;
+    transition:
+        transform 150ms ease,
+        color 150ms ease,
+        filter 150ms ease !important;
+}
+
+button[data-is-icon-only="true"]:hover,
+button[data-testid="play-button"]:hover,
+button[data-testid="control-button-playpause"]:hover,
+.main-playButton-PlayButton:hover {
+    filter: brightness(1.12);
+    transform: translateY(-1px) scale(1.04);
+}
+
+button[data-is-icon-only="true"]:active,
+button[data-testid="play-button"]:active,
+button[data-testid="control-button-playpause"]:active,
+.main-playButton-PlayButton:active {
+    transform: translateY(0) scale(0.97);
+}
+
+button[data-is-icon-only="true"]:focus-visible > span,
+button[data-testid="play-button"]:focus-visible > span,
+button[data-testid="control-button-playpause"]:focus-visible > span,
+.main-playButton-PlayButton:focus-visible > span {
+    outline: 2px solid color-mix(in srgb, var(--spice-button) 72%, white);
+    outline-offset: 3px;
+    border-radius: 9999px;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--spice-subtext) 34%, transparent);
+    border: 2px solid transparent;
+    border-radius: 99px;
+    background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}

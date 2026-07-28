@@ -1,0 +1,20 @@
+@define-color theme_bg_color #111111;
+@define-color theme_fg_color #f2f2f2;
+@define-color theme_base_color #171717;
+@define-color theme_text_color #f2f2f2;
+@define-color theme_selected_bg_color #f2f2f2;
+@define-color theme_selected_fg_color #111111;
+@define-color accent_color #f2f2f2;
+@define-color accent_bg_color #f2f2f2;
+@define-color accent_fg_color #111111;
+
+selection {
+    background-color: #f2f2f2;
+    color: #111111;
+}
+tooltip {
+    background-color: #111111;
+    color: #f2f2f2;
+    border: 1px solid #3f3f3f;
+    border-radius: 8px;
+}

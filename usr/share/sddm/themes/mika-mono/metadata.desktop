@@ -1,0 +1,10 @@
+[SddmGreeterTheme]
+Name=Mika Mono
+Description=Caelestia-inspired monochrome login screen for the Mika Hyprland rice
+Author=Mika (layout inspired by caelestia-dots)
+Type=sddm-theme
+Version=1.0
+MainScript=Main.qml
+Theme-Id=mika-mono
+Theme-API=2.0
+QtVersion=6

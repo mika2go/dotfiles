@@ -1,0 +1,137 @@
+{
+    "name": "mika-vertical",
+    "layer": "top",
+    "position": "left",
+    "output": ["DP-1"],
+    "width": 38,
+    "exclusive": true,
+    "passthrough": false,
+    "gtk-layer-shell": true,
+    "reload_style_on_change": true,
+    "spacing": 2,
+    "margin-top": 10,
+    "margin-bottom": 10,
+    "margin-left": 8,
+
+    "modules-left": [
+        "custom/launcher",
+        "hyprland/workspaces"
+    ],
+    "modules-center": [
+        "mpris"
+    ],
+    "modules-right": [
+        "network",
+        "pulseaudio",
+        "group/extensions",
+        "cpu",
+        "custom/gpu",
+        "clock"
+    ],
+
+    "custom/launcher": {
+        "format": "",
+        "tooltip-format": "Arch Linux · Anwendungen",
+        "on-click": "qs ipc call launcher toggle"
+    },
+
+    "hyprland/workspaces": {
+        "active-only": false,
+        "all-outputs": false,
+        "disable-scroll": true,
+        "format": " ",
+        "sort-by-number": true,
+        "persistent-workspaces": {
+            "DP-1": [1, 2, 3, 4, 5, 6, 7]
+        }
+    },
+
+    "mpris": {
+        "player": "playerctld",
+        "ignored-players": ["discord", "Discord"],
+        "format": "{player_icon}",
+        "format-paused": "{status_icon}",
+        "format-stopped": "",
+        "player-icons": {
+            "default": "󰎈",
+            "spotify": "",
+            "firefox": "",
+            "chromium": ""
+        },
+        "status-icons": {
+            "playing": "",
+            "paused": "",
+            "stopped": ""
+        },
+        "tooltip-format": "{player}\n{artist} — {title}",
+        "artist-len": 32,
+        "title-len": 42,
+        "on-click": "playerctl play-pause",
+        "on-click-middle": "playerctl previous",
+        "on-click-right": "playerctl next"
+    },
+
+    "clock": {
+        "interval": 1,
+        "format": "{:%H\n%M}",
+        "tooltip-format": "<b>{:%A, %d. %B %Y}</b>\n<tt>{calendar}</tt>"
+    },
+
+    "network": {
+        "format-wifi": "◉",
+        "format-ethernet": "◉",
+        "format-linked": "◉",
+        "format-disconnected": "◌",
+        "tooltip-format-wifi": "{essid}\n{signalStrength}% · {ipaddr}",
+        "tooltip-format-ethernet": "{ifname}\n{ipaddr}",
+        "on-click": "kitty -e nmtui"
+    },
+
+    "pulseaudio": {
+        "scroll-step": 5,
+        "format": "♪",
+        "format-muted": "×",
+        "tooltip-format": "Lautstärke {volume}%",
+        "on-click": "pavucontrol",
+        "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+    },
+
+    "group/extensions": {
+        "orientation": "vertical",
+        "drawer": {
+            "transition-duration": 180,
+            "children-class": "tray-hidden",
+            "click-to-reveal": true,
+            "transition-left-to-right": true
+        },
+        "modules": [
+            "custom/extensions",
+            "tray"
+        ]
+    },
+
+    "custom/extensions": {
+        "format": "󰐕",
+        "tooltip-format": "Hintergrund-Apps und Tray"
+    },
+
+    "tray": {
+        "icon-size": 16,
+        "spacing": 5,
+        "show-passive-items": true,
+        "reverse-direction": false
+    },
+
+    "cpu": {
+        "interval": 2,
+        "format": "{usage}",
+        "tooltip-format": "CPU {usage}%"
+    },
+
+    "custom/gpu": {
+        "exec": "/home/mika/.config/waybar/scripts/gpu-usage.sh",
+        "return-type": "json",
+        "interval": 2,
+        "format": "{}"
+    }
+}
