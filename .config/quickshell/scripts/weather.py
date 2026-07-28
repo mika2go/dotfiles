@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 
 
-CONFIG_PATH = Path.home() / ".config" / "quickshell" / "weather.json"
+CONFIG_PATH = Path.home() / ".local" / "state" / "quickshell-weather" / "config.json"
 
 SUMMARIES = {
     0: "KLAR",

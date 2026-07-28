@@ -93,15 +93,17 @@ Run `./install.sh --check` to see which commands are missing.
 
 ## Weather
 
-The weather helper reads its location from an ignored local file:
+The weather helper reads its location from a local state file outside the
+repository:
 
 ```bash
+mkdir -p ~/.local/state/quickshell-weather
 cp .config/quickshell/weather.json.example \
-  .config/quickshell/weather.json
+  ~/.local/state/quickshell-weather/config.json
 ```
 
-Set a display label, latitude and longitude in `weather.json`. The file is
-ignored by Git and is never installed from the repository.
+Set a display label, latitude and longitude in `config.json`. The private file
+is never installed or tracked by the repository.
 
 ## Keybinds
 

@@ -11,9 +11,6 @@
 # Generated theme state
 /.config/spicetify/Themes/RiceBlur/assets/wallpaper-current.jpg
 
-# Private weather location
-/.config/quickshell/weather.json
-
 # Old Fastfetch artwork revisions
 /.config/fastfetch/logo.before-rei.png
 /.config/fastfetch/logo.previous.png
