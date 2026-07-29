@@ -53,6 +53,29 @@ Optional parts use `fastfetch`, `ffmpeg`, `hypridle`, `hyprlock`, `ollama`,
 `qt6ct` and `spicetify`. The theme also expects JetBrainsMono Nerd Font,
 Adwaita Sans, Papirus-Dark and capitaine-cursors.
 
+## MonoSDF is not included
+
+This shell imports `Mono.Sdf`, a separate QML plugin. MonoSDF was not written
+by me, and neither its source nor its binaries are part of this repository.
+The install script does not install it.
+
+MonoSDF renders shapes with signed-distance-field shaders. The config uses its
+`SdfCanvas`, `SdfRoundRect` and `SdfGroup` types for the monitor-edge frame,
+rounded and merged shell surfaces, and parts of the dashboard and secondary
+panels. It is a structural dependency, not just an optional visual effect.
+
+To reproduce the setup, you need to obtain or create a compatible `Mono.Sdf`
+module, build it yourself and install it where Qt can find it. This config
+expects the module below:
+
+```text
+~/.local/lib/qt6/qml/Mono/Sdf/
+```
+
+The Hyprland autostart adds `~/.local/lib/qt6/qml` to `QML_IMPORT_PATH`.
+Without a compatible build, Quickshell fails at `import Mono.Sdf`, so these
+dotfiles cannot be used as a one-to-one copy of the screenshots.
+
 ## Install
 
 Clone the repo somewhere you want to keep it:
