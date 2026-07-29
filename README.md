@@ -1,5 +1,11 @@
 # Hyprland + Quickshell dotfiles
 
+> [!CAUTION]
+> **MonoSDF is required and is not included.** This is not a drop-in setup:
+> Quickshell will not start without a compatible `Mono.Sdf` module that you
+> build and install yourself. Read [the MonoSDF section](#monosdf-is-not-included)
+> and run `./install.sh --dry-run` before replacing any existing configuration.
+
 My Arch desktop configuration. The shell is written in QML with Quickshell;
 Hyprland handles the compositor, workspaces and window rules.
 
