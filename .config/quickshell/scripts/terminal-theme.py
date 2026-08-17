@@ -3,6 +3,8 @@
 import colorsys
 import json
 import os
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -149,6 +151,25 @@ def render(source: str, values: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def reload_kitty() -> None:
+    """Kitty reads the palette once at startup; SIGUSR1 makes it re-read."""
+    try:
+        listed = subprocess.run(
+            ["pgrep", "-x", "-u", str(os.getuid()), "kitty"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return
+
+    for line in listed.stdout.split():
+        try:
+            os.kill(int(line), signal.SIGUSR1)
+        except (ValueError, OSError):
+            pass
+
+
 def main() -> int:
     wallpaper = current_wallpaper()
     source = source_color(wallpaper)
@@ -158,6 +179,7 @@ def main() -> int:
     temporary = OUTPUT_FILE.with_suffix(".tmp")
     temporary.write_text(content, encoding="utf-8")
     os.replace(temporary, OUTPUT_FILE)
+    reload_kitty()
     return 0
 
 
