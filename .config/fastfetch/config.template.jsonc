@@ -1,0 +1,87 @@
+// Generated into config.jsonc by ~/.config/quickshell/scripts/fastfetch-theme.py.
+// Edit this template, never config.jsonc — that file is overwritten on every
+// wallpaper change. The logo itself is blackhole-sprite.png, recoloured to the
+// wallpaper by that same script and written out as blackhole.png.
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "kitty-direct",
+    "source": "/home/mika/.config/fastfetch/blackhole.png",
+    "width": 30,
+    "height": 12,
+    "preserveAspectRatio": true,
+    "padding": {
+      "top": 0,
+      "left": 1,
+      "right": 3
+    }
+  },
+  "display": {
+    "separator": "  ",
+    "color": {
+      "output": "{{output}}"
+    }
+  },
+  "modules": [
+    {
+      "type": "custom",
+      "key": "\u001b[{{frame}}m╭──────────╮",
+      "format": ""
+    },
+    {
+      "type": "title",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent1}}m\uf007  nme  \u001b[{{frame}}m│",
+      "format": "{user-name}"
+    },
+    {
+      "type": "title",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent1}}m\ue26d  hst  \u001b[{{frame}}m│",
+      "format": "{host-name}"
+    },
+    {
+      "type": "uptime",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent2}}m\uf017  upt  \u001b[{{frame}}m│",
+      "format": "{?days}{days}d {?}{?hours}{hours}h {?}{minutes}m"
+    },
+    {
+      "type": "os",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent2}}m\ue714  dst  \u001b[{{frame}}m│",
+      "format": "{name} {arch}"
+    },
+    {
+      "type": "kernel",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent3}}m\uf013  ker  \u001b[{{frame}}m│",
+      "format": "{release}"
+    },
+    {
+      "type": "wm",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent3}}m\uf108  twm  \u001b[{{frame}}m│",
+      "format": "{process-name}"
+    },
+    {
+      "type": "terminal",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent4}}m\uf489  trm  \u001b[{{frame}}m│",
+      "format": "{pretty-name}"
+    },
+    {
+      "type": "shell",
+      "key": "\u001b[{{frame}}m│  \u001b[{{accent4}}m\uf489  shl  \u001b[{{frame}}m│",
+      "format": "{process-name}"
+    },
+    {
+      "type": "custom",
+      "key": "\u001b[{{frame}}m├──────────┤",
+      "format": ""
+    },
+    {
+      "type": "custom",
+      "key": "\u001b[{{frame}}m│  \u001b[{{label}}m\ue22b  clr  \u001b[{{frame}}m│",
+      "format": "\u001b[{{swatch1}}m● \u001b[{{swatch2}}m● \u001b[{{swatch3}}m● \u001b[{{swatch4}}m● \u001b[{{swatch5}}m● \u001b[{{swatch6}}m● \u001b[{{swatch7}}m●\u001b[0m"
+    },
+    {
+      "type": "custom",
+      "key": "\u001b[{{frame}}m╰──────────╯",
+      "format": ""
+    }
+  ]
+}

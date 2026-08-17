@@ -1,10 +1,13 @@
+// Generated from config.template.jsonc by fastfetch-theme.py.
+// Source colour: #203b55
+// Edits here are lost on the next wallpaper change.
 {
   "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
   "logo": {
     "type": "kitty-direct",
-    "source": "/home/mika/.config/fastfetch/logo.png",
-    "width": 23,
-    "height": 15,
+    "source": "/home/mika/.config/fastfetch/blackhole.png",
+    "width": 30,
+    "height": 12,
     "preserveAspectRatio": true,
     "padding": {
       "top": 0,
@@ -13,76 +16,70 @@
     }
   },
   "display": {
-    "separator": " ",
+    "separator": "  ",
     "color": {
-      "keys": "38;2;196;184;244",
-      "output": "38;2;245;238;255"
+      "output": "38;2;197;204;211"
     }
   },
   "modules": [
     {
-      "key": "╭───────────╮",
       "type": "custom",
+      "key": "\u001b[38;2;188;199;210m╭──────────╮",
       "format": ""
     },
     {
-      "key": "│  user    │",
       "type": "title",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;145;174;202m\uf007  nme  \u001b[38;2;188;199;210m│",
       "format": "{user-name}"
     },
     {
-      "key": "│ 󰇅 hname   │",
+      "type": "title",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;145;174;202m\ue26d  hst  \u001b[38;2;188;199;210m│",
+      "format": "{host-name}"
+    },
+    {
+      "type": "uptime",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;145;150;202m\uf017  upt  \u001b[38;2;188;199;210m│",
+      "format": "{?days}{days}d {?}{?hours}{hours}h {?}{minutes}m"
+    },
+    {
+      "type": "os",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;145;150;202m\ue714  dst  \u001b[38;2;188;199;210m│",
+      "format": "{name} {arch}"
+    },
+    {
+      "type": "kernel",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;145;198;202m\uf013  ker  \u001b[38;2;188;199;210m│",
+      "format": "{release}"
+    },
+    {
+      "type": "wm",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;145;198;202m\uf108  twm  \u001b[38;2;188;199;210m│",
+      "format": "{process-name}"
+    },
+    {
+      "type": "terminal",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;164;145;202m\uf489  trm  \u001b[38;2;188;199;210m│",
+      "format": "{pretty-name}"
+    },
+    {
+      "type": "shell",
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;164;145;202m\uf489  shl  \u001b[38;2;188;199;210m│",
+      "format": "{process-name}"
+    },
+    {
       "type": "custom",
-      "format": "archlinux"
-    },
-    {
-      "key": "│ 󰅐 uptime  │",
-      "type": "uptime"
-    },
-    {
-      "key": "│  distro  │",
-      "type": "os"
-    },
-    {
-      "key": "│  kernel  │",
-      "type": "kernel"
-    },
-    {
-      "key": "│  term    │",
-      "type": "terminal"
-    },
-    {
-      "key": "│  shell   │",
-      "type": "shell"
-    },
-    {
-      "key": "│ 󰍛 cpu     │",
-      "type": "cpu",
-      "showPeCoreCount": true
-    },
-    {
-      "key": "│ 󰉉 disk    │",
-      "type": "disk",
-      "folders": "/",
-      "format": "{size-used} / {size-total} ({size-percentage}) - {filesystem}"
-    },
-    {
-      "key": "│  memory  │",
-      "type": "memory"
-    },
-    {
-      "key": "├───────────┤",
-      "type": "custom",
+      "key": "\u001b[38;2;188;199;210m├──────────┤",
       "format": ""
     },
     {
-      "key": "│ 󰏘 colors  │",
       "type": "custom",
-      "format": "\u001b[38;2;245;218;230m● \u001b[38;2;232;197;226m● \u001b[38;2;196;184;244m● \u001b[38;2;179;187;232m● \u001b[38;2;157;183;216m● \u001b[38;2;218;187;224m● \u001b[38;2;171;177;211m● \u001b[38;2;142;147;179m●\u001b[0m"
+      "key": "\u001b[38;2;188;199;210m│  \u001b[38;2;202;209;217m\ue22b  clr  \u001b[38;2;188;199;210m│",
+      "format": "\u001b[38;2;156;211;179m● \u001b[38;2;156;211;198m● \u001b[38;2;156;204;211m● \u001b[38;2;156;184;211m● \u001b[38;2;156;164;211m● \u001b[38;2;168;156;211m● \u001b[38;2;187;156;211m●\u001b[0m"
     },
     {
-      "key": "╰───────────╯",
       "type": "custom",
+      "key": "\u001b[38;2;188;199;210m╰──────────╯",
       "format": ""
     }
   ]
