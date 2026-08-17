@@ -1,0 +1,10 @@
+[Unit]
+Description=Ensure Equicord is patched into the current Discord build
+Documentation=file:%h/.local/bin/equicord-guard
+ConditionPathExists=%h/.local/bin/equicord-guard
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/equicord-guard --quiet
+Nice=10
+IOSchedulingClass=idle

@@ -1,0 +1,13 @@
+[Unit]
+Description=Repatch Equicord after Discord updates itself
+Documentation=file:%h/.local/bin/equicord-guard
+
+[Timer]
+# Discord stages a new app-<version> directory and then asks for a restart, so
+# a short interval catches the update before it is ever launched unmodded.
+OnStartupSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

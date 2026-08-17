@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# discord — shadow /usr/bin/discord so a plain `discord` in the shell also gets
+# Equicord. ~/.local/bin precedes /usr/bin in PATH.
+exec "${HOME}/.local/bin/equicord-bridge" "$@"

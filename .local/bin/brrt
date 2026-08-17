@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# brrt — brrtfetch with the octopus and this rice's fastfetch panel.
+#
+# Usage:
+#   brrt                      # octopus + the normal fastfetch card
+#   brrt gengar               # any gif under ~/Pictures/brrtfetch/gifs (name or path)
+#   brrt octopus -render quadrant -fps 30    # extra flags go straight to brrtfetch
+#
+# Ctrl-C quits. See ~/.config/brrtfetch/ for the versioned gifs.
+set -euo pipefail
+
+GIF_HOME="${BRRT_GIF_HOME:-$HOME/.config/brrtfetch}"
+GIF_LIB="${BRRT_GIF_LIB:-$HOME/Pictures/brrtfetch/gifs}"
+CFG_SRC="${BRRT_FASTFETCH_CONFIG:-$HOME/.config/fastfetch/config.jsonc}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/brrtfetch"
+
+render="${BRRT_RENDER:-half-block}"
+fps="${BRRT_FPS:-20}"
+
+resolve_gif() {
+    local want="$1"
+    [[ -f $want ]] && { printf '%s\n' "$want"; return; }
+    local hit
+    for dir in "$GIF_HOME" "$GIF_LIB"; do
+        [[ -d $dir ]] || continue
+        hit=$(find -L "$dir" -type f -iname "${want}.gif" -print -quit)
+        [[ -n $hit ]] && { printf '%s\n' "$hit"; return; }
+        hit=$(find -L "$dir" -type f -iname "*${want}*.gif" -print -quit)
+        [[ -n $hit ]] && { printf '%s\n' "$hit"; return; }
+    done
+    printf 'brrt: no gif matching %q under %s or %s\n' "$want" "$GIF_HOME" "$GIF_LIB" >&2
+    return 1
+}
+
+# First non-flag argument selects the gif; everything else is passed through.
+gif=""
+passthrough=()
+for arg in "$@"; do
+    if [[ -z $gif && $arg != -* ]]; then
+        gif=$(resolve_gif "$arg")
+    else
+        passthrough+=("$arg")
+    fi
+done
+[[ -n $gif ]] || gif="$GIF_HOME/octopus.gif"
+[[ -f $gif ]] || { echo "brrt: $gif not found" >&2; exit 1; }
+
+# The octopus plus the fastfetch boxes need roughly 120 columns; shrink the art
+# on narrower terminals instead of letting the panel wrap.
+cols=$(tput cols 2>/dev/null || echo 120)
+width="${BRRT_WIDTH:-}"
+if [[ -z $width ]]; then
+    width=44
+    (( cols < 118 )) && width=$(( cols - 74 ))
+    (( width < 20 )) && width=20
+fi
+
+# fastfetch runs as a child of brrtfetch, so its process-tree walk reports
+# "brrtfetch" as the terminal. Probe out here, where the answer is right, and
+# bake the values into a derived config.
+probe=$(fastfetch --logo none -s terminal:shell --format json 2>/dev/null || echo '[]')
+
+mkdir -p "$CACHE"
+cfg="$CACHE/fastfetch-brrt.jsonc"
+python3 - "$CFG_SRC" "$cfg" "$probe" <<'PY'
+import json, re, sys
+
+src, out, probe_raw = sys.argv[1], sys.argv[2], sys.argv[3]
+
+detected = {}
+try:
+    for entry in json.loads(probe_raw):
+        r = entry.get("result") or {}
+        name = r.get("prettyName") or r.get("exeName") or ""
+        if entry.get("type") == "Terminal" and name:
+            detected["terminal"] = name
+        elif entry.get("type") == "Shell" and name:
+            detected["shell"] = name
+except (ValueError, TypeError):
+    pass
+
+text = open(src, encoding="utf-8").read()
+text = re.sub(r'^\s*//.*$', '', text, flags=re.M)
+cfg = json.loads(text)
+
+cfg["logo"] = {"type": "none"}
+
+modules = []
+for m in cfg.get("modules", []):
+    if isinstance(m, dict) and m.get("type") in detected:
+        m = dict(m, type="custom", format=detected[m["type"]])
+        m.pop("outputColor", None)
+    modules.append(m)
+cfg["modules"] = modules
+
+json.dump(cfg, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+
+exec brrtfetch \
+    -render "$render" \
+    -width "$width" \
+    -fps "$fps" \
+    -info "fastfetch --config $cfg" \
+    "${passthrough[@]}" \
+    "$gif"

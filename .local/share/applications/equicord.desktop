@@ -1,0 +1,12 @@
+[Desktop Entry]
+# Overrides the AUR package entry, which runs /usr/bin/equicord and would
+# install the packaged asar over the dev build in ~/System/Equicord.
+Name=Equicord
+StartupWMClass=discord
+Comment=Discord with Equicord
+GenericName=Instant Messenger
+Exec=/home/mika/.local/bin/equicord-bridge --ozone-platform=wayland --enable-features=WebRTCPipeWireCapturer
+Icon=equicord
+Type=Application
+Categories=Network;InstantMessaging;
+Path=/usr/bin

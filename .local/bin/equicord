@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# equicord — shadow /usr/bin/equicord from the AUR package, which would install
+# the packaged asar over the dev build in ~/System/Equicord.
+exec "${HOME}/.local/bin/equicord-bridge" "$@"

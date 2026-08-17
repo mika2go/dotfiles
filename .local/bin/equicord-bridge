@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# equicord-bridge — launch Discord, never unmodded.
+#
+# Repairs the Equicord patch first (see equicord-guard), then execs the real
+# Discord host. Every launch path routes through here: the desktop entries, the
+# discord:// handler and the discord/equicord shims in ~/.local/bin.
+
+set -uo pipefail
+
+readonly CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+readonly DISCORD_HOST="${CONFIG_HOME}/discord/Discord"
+readonly GUARD="${HOME}/.local/bin/equicord-guard"
+
+# No Discord host yet: let the packaged launcher bootstrap one — it downloads
+# Discord and patches it with the packaged asar. The guard swaps in the dev
+# build on its next run.
+if [[ ! -x ${DISCORD_HOST} ]]; then
+    exec /usr/bin/equicord "$@"
+fi
+
+# A failing guard must never keep Discord from starting.
+if [[ -x ${GUARD} ]]; then
+    "${GUARD}" --quiet --no-restart || true
+fi
+
+exec "${DISCORD_HOST}" "$@"

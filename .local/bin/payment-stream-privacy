@@ -1,0 +1,1379 @@
+#!/usr/bin/env python3
+"""Protect private windows and pages from PipeWire screen capture.
+
+The daemon only inspects AT-SPI roles, accessible names, descriptions and
+element attributes. It never requests or reads the text/value interface of a
+form control.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+import warnings
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import gi
+
+gi.require_version("Atspi", "2.0")
+gi.require_version("GLib", "2.0")
+from gi.repository import Atspi, GLib  # noqa: E402
+
+
+ZEN_CLASS = re.compile(r"^zen(?:-alpha|-beta)?$", re.IGNORECASE)
+BROWSER_CLASS = re.compile(
+    r"^(?:zen(?:-alpha|-beta)?|firefox(?:-developeredition)?|"
+    r"chromium|google-chrome(?:-stable)?|brave-browser|"
+    r"vivaldi(?:-stable)?)$",
+    re.IGNORECASE,
+)
+ALWAYS_PRIVATE_CLASS = re.compile(
+    r"^(?:"
+    r"1password|bitwarden|com\.bitwarden\.desktop|keepassxc|"
+    r"org\.keepassxc\.KeePassXC|org\.gnome\.World\.Secrets|"
+    r"org\.gnome\.seahorse\.Application|proton-pass|"
+    r"org\.gnome\.Settings|gnome-control-center|"
+    r"org\.kde\.systemsettings|systemsettings"
+    r")$",
+    re.IGNORECASE,
+)
+PRIVATE_WINDOW_TITLE = re.compile(
+    r"^(?:"
+    r"settings|preferences|account settings|privacy settings|"
+    r"security settings|personal data|payment settings|billing|"
+    r"einstellungen|kontoeinstellungen|datenschutz(?:einstellungen)?|"
+    r"sicherheitseinstellungen|persönliche daten|zahlungseinstellungen|"
+    r"abrechnung"
+    r")(?:\s+[—|-]\s+[^—|-]+)?$",
+    re.IGNORECASE,
+)
+ADDRESS = re.compile(r"^0x[0-9a-f]+$", re.IGNORECASE)
+GMX_HOST = re.compile(r"^(?:[a-z0-9-]+\.)*gmx\.(?:de|net)$", re.IGNORECASE)
+GMX_TITLE = re.compile(r"(?:^|\W)gmx(?:\W|$)", re.IGNORECASE)
+CHATGPT_HOST = re.compile(
+    r"^(?:chatgpt\.com|chat\.openai\.com)$",
+    re.IGNORECASE,
+)
+PAYMENT_AUTOCOMPLETE = re.compile(
+    r"(?:^|\s)(?:cc-name|cc-given-name|cc-additional-name|"
+    r"cc-family-name|cc-number|cc-exp|cc-exp-month|cc-exp-year|"
+    r"cc-csc|cc-type)(?:\s|$)",
+    re.IGNORECASE,
+)
+PRIVATE_AUTOCOMPLETE = re.compile(
+    r"(?:^|\s)(?:"
+    r"name|honorific-prefix|given-name|additional-name|family-name|"
+    r"honorific-suffix|nickname|username|new-password|current-password|"
+    r"one-time-code|organization-title|organization|street-address|"
+    r"address-line1|address-line2|address-line3|address-level1|"
+    r"address-level2|address-level3|address-level4|country|country-name|"
+    r"postal-code|email|tel|tel-country-code|tel-national|"
+    r"tel-area-code|tel-local|tel-local-prefix|tel-local-suffix|"
+    r"bday|bday-day|bday-month|bday-year"
+    r")(?:\s|$)",
+    re.IGNORECASE,
+)
+PAYMENT_TERMS = re.compile(
+    r"\b(?:"
+    r"card\s*(?:number|holder|name)|credit\s*card|debit\s*card|"
+    r"security\s*code|card\s*code|cvc|cvv|cvn|expiry|expiration|"
+    r"valid\s*(?:thru|through|until)|iban|routing\s*number|"
+    r"bank\s*account|account\s*number|payment\s*method|"
+    r"kartennummer|karteninhaber|kreditkartennummer|kreditkarte|"
+    r"debitkartennummer|debitkarte|"
+    r"sicherheitscode|prüfnummer|ablaufdatum|gültig\s*bis|"
+    r"bankkonto|kontonummer|zahlungs(?:art|methode)|"
+    r"paypal|klarna|giropay"
+    r")\b",
+    re.IGNORECASE,
+)
+PRIVATE_TERMS = re.compile(
+    r"\b(?:"
+    r"e-?mail(?:\s*address)?|phone(?:\s*number)?|mobile(?:\s*number)?|"
+    r"telephone|street\s*address|postal\s*address|home\s*address|"
+    r"postal\s*code|zip\s*code|date\s*of\s*birth|birthday|"
+    r"password|passcode|recovery\s*code|backup\s*code|api\s*key|"
+    r"access\s*token|secret\s*key|social\s*security|tax\s*id|"
+    r"settings|billing|subscription|payment\s*(?:details|settings)|"
+    r"manage\s*(?:plan|subscription)|invoices?|"
+    r"personal\s*(?:data|details|information)|account\s*details|"
+    r"e-?mail(?:adresse)?|telefon(?:nummer)?|handynummer|"
+    r"anschrift|straße|strasse|postleitzahl|geburtsdatum|"
+    r"passwort|wiederherstellungscode|sicherungscode|"
+    r"einstellungen|abrechnung|abonnement|abo(?:nnements?)?|"
+    r"zahlungs(?:daten|einstellungen)|rechnungen?|"
+    r"persönliche\s*(?:daten|angaben|informationen)|kontodaten"
+    r")\b",
+    re.IGNORECASE,
+)
+SETTINGS_DIALOG_TERMS = re.compile(
+    r"\b(?:"
+    r"settings|billing|subscription|manage\s+plan|payment|invoice|"
+    r"einstellungen|abrechnung|abonnement|abo|zahlung|rechnung"
+    r")\b",
+    re.IGNORECASE,
+)
+PRIVATE_PATH = re.compile(
+    r"(?:^|/)(?:"
+    r"account|accounts|account-settings|address|addresses|autofill|"
+    r"billing|checkout|credentials|document|documents|identity|inbox|"
+    r"invoice|invoices|login|mail|messages|my-account|myaccount|order|"
+    r"orders|passwords|payment|payments|payment-methods|personal|"
+    r"personal-data|personal-info|privacy|privacy-checkup|profile|"
+    r"profiles|security|security-checkup|settings|subscription|"
+    r"subscriptions|wallet"
+    r")(?:/|$)",
+    re.IGNORECASE,
+)
+PRIVATE_ABOUT = {"logins", "preferences"}
+CONTROL_ROLES = {
+    "check box",
+    "combo box",
+    "entry",
+    "menu item",
+    "page tab",
+    "password text",
+    "push button",
+    "radio button",
+    "spin button",
+    "toggle button",
+}
+DOCUMENT_ROLES = {"document web", "document frame"}
+SETTINGS_DIALOG_ROLES = {"alert", "dialog"}
+SCAN_LIMIT = 12_000
+CLEAR_AFTER_MISSES = 1
+POLL_INTERVAL_MS = 500
+GMX_RELEASE_DELAY_MS = 120
+
+RUNTIME_DIR = Path(
+    os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+)
+STATE_PATH = RUNTIME_DIR / "payment-stream-privacy.json"
+COMMAND_PATH = RUNTIME_DIR / "payment-stream-privacy-command.json"
+
+
+def hyprctl(*arguments: str, json_output: bool = False) -> Any:
+    command = ["hyprctl"]
+    if json_output:
+        command.append("-j")
+    command.extend(arguments)
+    result = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=2,
+    )
+    if json_output:
+        return json.loads(result.stdout)
+    return result.stdout.strip()
+
+
+def active_window() -> dict[str, Any] | None:
+    try:
+        window = hyprctl("activewindow", json_output=True)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return None
+    if not isinstance(window, dict):
+        return None
+    return window
+
+
+def all_clients() -> dict[str, dict[str, Any]]:
+    try:
+        clients = hyprctl("clients", json_output=True)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return {}
+    if not isinstance(clients, list):
+        return {}
+    return {
+        str(client.get("address", "")): client
+        for client in clients
+        if ADDRESS.fullmatch(str(client.get("address", "")))
+    }
+
+
+def zen_clients() -> dict[str, dict[str, Any]]:
+    return {
+        address: client
+        for address, client in all_clients().items()
+        if ZEN_CLASS.fullmatch(str(client.get("class", "")))
+    }
+
+
+def window_metadata_requires_privacy(window: dict[str, Any]) -> bool:
+    window_class = str(window.get("class", ""))
+    if ALWAYS_PRIVATE_CLASS.fullmatch(window_class):
+        return True
+    if BROWSER_CLASS.fullmatch(window_class):
+        return False
+    title = " ".join(str(window.get("title", "")).casefold().split())
+    return bool(PRIVATE_WINDOW_TITLE.fullmatch(title))
+
+
+def set_protected(address: str, enabled: bool) -> bool:
+    if not ADDRESS.fullmatch(address):
+        return False
+    if enabled and address not in all_clients():
+        return False
+    value = "true" if enabled else "false"
+    expression = (
+        "hl.dsp.window.set_prop({ "
+        f"window = 'address:{address}', "
+        "prop = 'no_screen_share', "
+        f"value = '{value}'"
+        " })"
+    )
+    try:
+        if hyprctl("dispatch", expression) != "ok":
+            return False
+        actual = hyprctl(
+            "getprop",
+            f"address:{address}",
+            "no_screen_share",
+        )
+        return actual == value
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def notify(message: str, color: str = "rgba(116,154,200,ff)") -> None:
+    try:
+        hyprctl(
+            "notify",
+            "2",
+            "2600",
+            color,
+            f"Privacy Guard: {message}",
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def atomic_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, separators=(",", ":"))
+            handle.write("\n")
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def normalize_title(title: str) -> str:
+    normalized = re.sub(r"\s+[—-]\s+Zen Browser$", "", title).strip()
+    return " ".join(normalized.casefold().split())
+
+
+def safe_text(accessible: Atspi.Accessible) -> str:
+    parts: list[str] = []
+    for getter in (accessible.get_name, accessible.get_description):
+        try:
+            value = getter()
+        except Exception:
+            value = ""
+        if value:
+            parts.append(str(value))
+    try:
+        attributes = accessible.get_attributes() or {}
+    except Exception:
+        attributes = {}
+    for key in (
+        "autocomplete",
+        "aria-label",
+        "class",
+        "id",
+        "placeholder",
+        "tag",
+        "xml-roles",
+    ):
+        value = attributes.get(key, "")
+        if value:
+            parts.append(str(value))
+    return " ".join(parts)
+
+
+def is_private_control(accessible: Atspi.Accessible) -> bool:
+    try:
+        role = accessible.get_role_name()
+    except Exception:
+        return False
+    if role not in CONTROL_ROLES:
+        return False
+    metadata = safe_text(accessible)
+    if not metadata:
+        return False
+    try:
+        attributes = accessible.get_attributes() or {}
+    except Exception:
+        attributes = {}
+    autocomplete = str(attributes.get("autocomplete", ""))
+    return bool(
+        PAYMENT_AUTOCOMPLETE.search(autocomplete)
+        or PRIVATE_AUTOCOMPLETE.search(autocomplete)
+        or PAYMENT_TERMS.search(metadata)
+        or PRIVATE_TERMS.search(metadata)
+    )
+
+
+def is_private_settings_dialog(accessible: Atspi.Accessible) -> bool:
+    try:
+        role = accessible.get_role_name()
+    except Exception:
+        return False
+    if role not in SETTINGS_DIALOG_ROLES:
+        return False
+
+    stack = [accessible]
+    scanned = 0
+    while stack and scanned < 800:
+        current = stack.pop()
+        scanned += 1
+        if SETTINGS_DIALOG_TERMS.search(safe_text(current)):
+            return True
+        stack.extend(reversed(accessible_children(current)))
+    return False
+
+
+def is_browser_tab(accessible: Atspi.Accessible) -> bool:
+    try:
+        if accessible.get_role_name() != "page tab":
+            return False
+    except Exception:
+        return False
+    current: Atspi.Accessible | None = accessible
+    for _ in range(5):
+        if current is None:
+            break
+        try:
+            role = current.get_role_name()
+            name = current.get_name() or ""
+        except Exception:
+            return False
+        if role == "tool bar" and name.casefold() == "browser tabs":
+            return True
+        try:
+            current = current.get_parent()
+        except Exception:
+            return False
+    return False
+
+
+def accessible_children(
+    accessible: Atspi.Accessible,
+) -> list[Atspi.Accessible]:
+    try:
+        count = min(accessible.get_child_count(), SCAN_LIMIT)
+    except Exception:
+        return []
+    children: list[Atspi.Accessible] = []
+    for index in range(count):
+        try:
+            child = accessible.get_child_at_index(index)
+        except Exception:
+            continue
+        if child is not None:
+            children.append(child)
+    return children
+
+
+def accessible_frames() -> list[tuple[str, int, Atspi.Accessible]]:
+    frames: list[tuple[str, int, Atspi.Accessible]] = []
+    try:
+        desktop = Atspi.get_desktop(0)
+    except Exception:
+        return frames
+    for application in accessible_children(desktop):
+        try:
+            application_name = str(application.get_name() or "")
+        except Exception:
+            application_name = ""
+        try:
+            application_pid = int(application.get_process_id())
+        except Exception:
+            application_pid = 0
+        for child in accessible_children(application):
+            try:
+                if child.get_role_name() == "frame":
+                    frames.append((application_name, application_pid, child))
+            except Exception:
+                continue
+    return frames
+
+
+def normalized_identifier(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def frame_for_window(window: dict[str, Any]) -> Atspi.Accessible | None:
+    wanted = normalize_title(str(window.get("title", "")))
+    window_class = str(window.get("class", ""))
+    try:
+        window_pid = int(window.get("pid", 0))
+    except (TypeError, ValueError):
+        window_pid = 0
+
+    candidates: list[tuple[str, int, Atspi.Accessible]] = []
+    for application_name, application_pid, frame in accessible_frames():
+        try:
+            candidate = normalize_title(frame.get_name() or "")
+        except Exception:
+            continue
+        if candidate == wanted:
+            candidates.append((application_name, application_pid, frame))
+
+    if ZEN_CLASS.fullmatch(window_class):
+        zen_candidates = [
+            candidate for candidate in candidates
+            if candidate[0].casefold() == "zen"
+        ]
+        if len(zen_candidates) == 1:
+            return zen_candidates[0][2]
+
+    if window_pid:
+        pid_candidates = [
+            candidate for candidate in candidates
+            if candidate[1] == window_pid
+        ]
+        if len(pid_candidates) == 1:
+            return pid_candidates[0][2]
+
+    class_identifier = normalized_identifier(window_class)
+    if class_identifier:
+        named_candidates = []
+        for candidate in candidates:
+            application_identifier = normalized_identifier(candidate[0])
+            if (
+                application_identifier
+                and (
+                    application_identifier in class_identifier
+                    or class_identifier in application_identifier
+                )
+            ):
+                named_candidates.append(candidate)
+        if len(named_candidates) == 1:
+            return named_candidates[0][2]
+
+    if len(candidates) == 1:
+        return candidates[0][2]
+    return None
+
+
+def document_for_frame(
+    frame: Atspi.Accessible,
+    title: str,
+) -> Atspi.Accessible | None:
+    wanted = normalize_title(title)
+    documents: list[Atspi.Accessible] = []
+    stack = [frame]
+    scanned = 0
+    while stack and scanned < SCAN_LIMIT:
+        accessible = stack.pop()
+        scanned += 1
+        try:
+            role = accessible.get_role_name()
+        except Exception:
+            role = ""
+        if role in DOCUMENT_ROLES:
+            documents.append(accessible)
+            try:
+                if normalize_title(accessible.get_name() or "") == wanted:
+                    return accessible
+            except Exception:
+                pass
+        stack.extend(reversed(accessible_children(accessible)))
+    for document in documents:
+        try:
+            states = document.get_state_set()
+            if states.contains(Atspi.StateType.SHOWING):
+                return document
+        except Exception:
+            continue
+    return None
+
+
+def document_url(document: Atspi.Accessible) -> str:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            return str(
+                document.get_document_attribute_value("DocURL") or ""
+            )
+    except Exception:
+        return ""
+
+
+def url_requires_privacy(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    hostname = parsed.hostname or ""
+    if GMX_HOST.fullmatch(hostname):
+        return True
+    if parsed.scheme.casefold() == "about":
+        return parsed.path.casefold() in PRIVATE_ABOUT
+    route = parsed.path
+    if parsed.fragment:
+        route = f"{route}/{parsed.fragment.lstrip('/')}"
+    return bool(PRIVATE_PATH.search(route))
+
+
+def document_requires_privacy(document: Atspi.Accessible) -> bool | None:
+    url = document_url(document)
+    if url_requires_privacy(url):
+        return True
+    try:
+        hostname = urlsplit(url).hostname or ""
+    except ValueError:
+        hostname = ""
+    is_chatgpt = bool(CHATGPT_HOST.fullmatch(hostname))
+
+    stack = [document]
+    scanned = 0
+    while stack and scanned < SCAN_LIMIT:
+        accessible = stack.pop()
+        scanned += 1
+        if is_private_control(accessible):
+            return True
+        if is_chatgpt and is_private_settings_dialog(accessible):
+            return True
+        stack.extend(reversed(accessible_children(accessible)))
+    if stack:
+        return None
+    return False
+
+
+def frame_requires_privacy(frame: Atspi.Accessible) -> bool | None:
+    stack = [frame]
+    scanned = 0
+    while stack and scanned < SCAN_LIMIT:
+        accessible = stack.pop()
+        scanned += 1
+        if is_private_control(accessible):
+            return True
+        if is_private_settings_dialog(accessible):
+            return True
+        stack.extend(reversed(accessible_children(accessible)))
+    if stack:
+        return None
+    return False
+
+
+def window_requires_privacy(window: dict[str, Any]) -> bool | None:
+    if window_metadata_requires_privacy(window):
+        return True
+
+    title = str(window.get("title", ""))
+    # GMX keeps the product name in Zen's native window title. This fallback
+    # stays reliable even when one of Firefox's content-process AT-SPI sockets
+    # has disappeared and the active document can no longer be traversed.
+    if (
+        ZEN_CLASS.fullmatch(str(window.get("class", "")))
+        and GMX_TITLE.search(normalize_title(title))
+    ):
+        return True
+    frame = frame_for_window(window)
+    if frame is None:
+        return None
+    document = document_for_frame(frame, title)
+    if document is not None:
+        detected = document_requires_privacy(document)
+        if detected is not False:
+            return detected
+    if BROWSER_CLASS.fullmatch(str(window.get("class", ""))):
+        return False if document is not None else None
+    return frame_requires_privacy(frame)
+
+
+def page_requires_privacy(title: str) -> bool | None:
+    """Compatibility wrapper for the Zen-only probe path."""
+    return window_requires_privacy({"class": "zen", "title": title})
+
+
+class PrivacyDaemon:
+    def __init__(self) -> None:
+        self.protected: dict[str, dict[str, Any]] = {}
+        self.scan_cache: dict[str, tuple[str, bool | None]] = {}
+        self.loop = GLib.MainLoop()
+        self.focus_listener: Atspi.EventListener | None = None
+        self.document_listener: Atspi.EventListener | None = None
+        self.showing_listener: Atspi.EventListener | None = None
+        self.tab_listener: Atspi.EventListener | None = None
+        self.hypr_event_socket: socket.socket | None = None
+        self.hypr_event_source: int | None = None
+        self.hypr_event_buffer = ""
+        self.load_state()
+
+    def load_state(self) -> None:
+        try:
+            payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        records = payload.get("protected", {})
+        if not isinstance(records, dict):
+            return
+        live = all_clients()
+        for address, record in records.items():
+            if (
+                address in live
+                and isinstance(record, dict)
+                and set_protected(address, True)
+            ):
+                self.protected[address] = {
+                    "manual": bool(record.get("manual")),
+                    "misses": 0,
+                    "gmx": bool(record.get("gmx")),
+                }
+
+    def save_state(self) -> None:
+        atomic_json(
+            STATE_PATH,
+            {
+                "daemonPid": os.getpid(),
+                "protected": self.protected,
+                "updatedAt": int(time.time() * 1000),
+            },
+        )
+
+    def protect(
+        self,
+        address: str,
+        manual: bool = False,
+        announce: bool = True,
+        gmx: bool | None = None,
+    ) -> None:
+        current = self.protected.get(address)
+        if current is not None:
+            changed = (
+                (manual and not current.get("manual"))
+                or int(current.get("misses", 0)) != 0
+                or (
+                    gmx is not None
+                    and bool(current.get("gmx")) != gmx
+                )
+            )
+            current["manual"] = bool(current.get("manual")) or manual
+            current["misses"] = 0
+            if gmx is not None:
+                current["gmx"] = gmx
+            if changed:
+                self.save_state()
+            return
+        if not set_protected(address, True):
+            return
+        self.protected[address] = {
+            "manual": manual,
+            "misses": 0,
+            "gmx": bool(gmx),
+        }
+        self.save_state()
+        if announce:
+            notify("Fenster im Stream geschwärzt")
+
+    def clear(self, address: str, announce: bool = True) -> None:
+        if address not in self.protected:
+            return
+        if address in all_clients() and not set_protected(address, False):
+            notify("Schutz konnte nicht aufgehoben werden", "rgba(226,99,99,ff)")
+            return
+        self.protected.pop(address, None)
+        self.save_state()
+        if announce:
+            notify("Fenster wieder sichtbar", "rgba(116,200,154,ff)")
+
+    def clear_all(self, announce: bool = True) -> None:
+        had_entries = bool(self.protected)
+        live = all_clients()
+        for address in list(self.protected):
+            if address not in live or set_protected(address, False):
+                self.protected.pop(address, None)
+        self.save_state()
+        if announce and had_entries and not self.protected:
+            notify("Schutz aufgehoben", "rgba(116,200,154,ff)")
+
+    def clear_manual(self) -> None:
+        cleared = False
+        for address, record in list(self.protected.items()):
+            if not record.get("manual"):
+                continue
+            before = address in self.protected
+            self.clear(address, announce=False)
+            cleared = cleared or (before and address not in self.protected)
+        if cleared:
+            notify("Manueller Schutz aufgehoben", "rgba(116,200,154,ff)")
+
+    def handle_command(self) -> None:
+        try:
+            payload = json.loads(COMMAND_PATH.read_text(encoding="utf-8"))
+            COMMAND_PATH.unlink()
+        except FileNotFoundError:
+            return
+        except (OSError, json.JSONDecodeError):
+            try:
+                COMMAND_PATH.unlink()
+            except FileNotFoundError:
+                pass
+            return
+        command = payload.get("command")
+        if command == "clear":
+            self.clear_all()
+            return
+        if command == "clear-manual":
+            self.clear_manual()
+            return
+        if command != "toggle":
+            return
+        window = active_window()
+        if not window:
+            notify("Kein aktives Fenster", "rgba(226,99,99,ff)")
+            return
+        address = str(window.get("address", ""))
+        if not ADDRESS.fullmatch(address):
+            notify("Fenster nicht schützbar", "rgba(226,99,99,ff)")
+            return
+        if address in self.protected:
+            self.clear(address)
+        else:
+            self.protect(address, manual=True)
+
+    def focused_private_event(
+        self,
+        event: Atspi.Event,
+        *_: Any,
+    ) -> None:
+        if not event.detail1:
+            return
+        source = event.source
+        if source is None:
+            return
+        window = active_window()
+        if not window:
+            return
+        address = str(window.get("address", ""))
+        if not ADDRESS.fullmatch(address):
+            return
+        self.scan_cache.pop(address, None)
+        if (
+            ZEN_CLASS.fullmatch(str(window.get("class", "")))
+            and is_browser_tab(source)
+        ):
+            try:
+                tab_title = source.get_name() or ""
+            except Exception:
+                tab_title = ""
+            if GMX_TITLE.search(tab_title):
+                self.protect(address, announce=False, gmx=True)
+            return
+        if is_private_control(source):
+            self.protect(address)
+
+    def browser_tab_selected_event(
+        self,
+        event: Atspi.Event,
+        *_: Any,
+    ) -> None:
+        # GMX can be identified from the browser-tab label before Zen commits
+        # its web document. Public tabs are deliberately left untouched.
+        if not event.detail1 or event.source is None:
+            return
+        if not is_browser_tab(event.source):
+            return
+        window = active_window()
+        if not window or not ZEN_CLASS.fullmatch(str(window.get("class", ""))):
+            return
+        address = str(window.get("address", ""))
+        self.scan_cache.pop(address, None)
+        try:
+            tab_title = event.source.get_name() or ""
+        except Exception:
+            tab_title = ""
+        if GMX_TITLE.search(tab_title):
+            self.protect(address, announce=False, gmx=True)
+
+    def release_gmx_after_title_change(
+        self,
+        address: str,
+        expected_title: str,
+    ) -> bool:
+        client = all_clients().get(address)
+        if client is None:
+            return GLib.SOURCE_REMOVE
+        title = str(client.get("title", ""))
+        if title != expected_title or GMX_TITLE.search(normalize_title(title)):
+            return GLib.SOURCE_REMOVE
+        record = self.protected.get(address)
+        if record is None or record.get("manual") or not record.get("gmx"):
+            return GLib.SOURCE_REMOVE
+        detected = window_requires_privacy(client)
+        self.scan_cache[address] = (title, detected)
+        if detected is True:
+            self.protect(address, gmx=False)
+        else:
+            self.clear(address, announce=False)
+        return GLib.SOURCE_REMOVE
+
+    def reevaluate_after_title_change(
+        self,
+        address: str,
+        expected_title: str,
+    ) -> bool:
+        client = all_clients().get(address)
+        if client is None or str(client.get("title", "")) != expected_title:
+            return GLib.SOURCE_REMOVE
+        record = self.protected.get(address)
+        if record is None or record.get("manual") or record.get("gmx"):
+            return GLib.SOURCE_REMOVE
+        detected = window_requires_privacy(client)
+        self.scan_cache[address] = (expected_title, detected)
+        if detected is True:
+            self.protect(address)
+        elif detected is False:
+            self.clear(address, announce=False)
+        return GLib.SOURCE_REMOVE
+
+    def handle_hypr_event_line(self, line: str) -> None:
+        if not line.startswith("windowtitlev2>>"):
+            return
+        payload = line.removeprefix("windowtitlev2>>")
+        raw_address, separator, title = payload.partition(",")
+        if not separator:
+            return
+        address = raw_address if raw_address.startswith("0x") else f"0x{raw_address}"
+        client = all_clients().get(address)
+        if client is None:
+            return
+        self.scan_cache.pop(address, None)
+        if window_metadata_requires_privacy(client):
+            self.protect(address, announce=False)
+            return
+        if (
+            ZEN_CLASS.fullmatch(str(client.get("class", "")))
+            and GMX_TITLE.search(normalize_title(title))
+        ):
+            self.protect(address, announce=False, gmx=True)
+            return
+        record = self.protected.get(address)
+        if record is not None and record.get("gmx") and not record.get("manual"):
+            # The native GMX title rule stops matching at this exact event.
+            # Reassert the property once so its removal cannot expose the last
+            # GMX frame during the short release delay.
+            if not set_protected(address, True):
+                return
+            GLib.timeout_add(
+                GMX_RELEASE_DELAY_MS,
+                self.release_gmx_after_title_change,
+                address,
+                title,
+            )
+            return
+        if record is not None and not record.get("manual"):
+            GLib.timeout_add(
+                GMX_RELEASE_DELAY_MS,
+                self.reevaluate_after_title_change,
+                address,
+                title,
+            )
+
+    def hypr_event_ready(
+        self,
+        _: int,
+        condition: GLib.IOCondition,
+    ) -> bool:
+        if condition & (GLib.IO_HUP | GLib.IO_ERR):
+            return GLib.SOURCE_REMOVE
+        if self.hypr_event_socket is None:
+            return GLib.SOURCE_REMOVE
+        try:
+            chunk = self.hypr_event_socket.recv(65_536)
+        except BlockingIOError:
+            return GLib.SOURCE_CONTINUE
+        except OSError:
+            return GLib.SOURCE_REMOVE
+        if not chunk:
+            return GLib.SOURCE_REMOVE
+        self.hypr_event_buffer += chunk.decode("utf-8", errors="replace")
+        *lines, self.hypr_event_buffer = self.hypr_event_buffer.split("\n")
+        for line in lines:
+            self.handle_hypr_event_line(line)
+        return GLib.SOURCE_CONTINUE
+
+    def connect_hypr_events(self) -> None:
+        signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+        if not signature:
+            return
+        path = RUNTIME_DIR / "hypr" / signature / ".socket2.sock"
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.connect(str(path))
+        except OSError:
+            connection.close()
+            return
+        connection.setblocking(False)
+        self.hypr_event_socket = connection
+        self.hypr_event_source = GLib.io_add_watch(
+            connection.fileno(),
+            GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR,
+            self.hypr_event_ready,
+        )
+
+    def showing_changed_event(
+        self,
+        event: Atspi.Event,
+        *__: Any,
+    ) -> None:
+        source = event.source
+        if source is None:
+            return
+        try:
+            if source.get_role_name() not in SETTINGS_DIALOG_ROLES:
+                return
+        except Exception:
+            return
+        window = active_window()
+        if not window:
+            return
+        address = str(window.get("address", ""))
+        if not ADDRESS.fullmatch(address):
+            return
+        self.scan_cache.pop(address, None)
+
+    def document_loaded_event(
+        self,
+        event: Atspi.Event,
+        *_: Any,
+    ) -> None:
+        source = event.source
+        if source is None:
+            return
+        try:
+            if source.get_role_name() not in DOCUMENT_ROLES:
+                return
+        except Exception:
+            return
+        window = active_window()
+        if not window or not ZEN_CLASS.fullmatch(str(window.get("class", ""))):
+            return
+        address = str(window.get("address", ""))
+        title = str(window.get("title", ""))
+        try:
+            document_title = normalize_title(source.get_name() or "")
+        except Exception:
+            document_title = ""
+        if document_title and document_title != normalize_title(title):
+            return
+        detected = document_requires_privacy(source)
+        self.scan_cache[address] = (title, detected)
+        if detected is True:
+            self.protect(address)
+
+    def reconcile(self) -> bool:
+        self.handle_command()
+        clients = all_clients()
+        for address in list(self.scan_cache):
+            if address not in clients:
+                self.scan_cache.pop(address, None)
+        for address in list(self.protected):
+            if address not in clients:
+                self.protected.pop(address, None)
+                self.save_state()
+
+        for address, client in clients.items():
+            if window_metadata_requires_privacy(client):
+                self.protect(address, announce=False)
+
+        window = active_window()
+        if not window:
+            return GLib.SOURCE_CONTINUE
+        address = str(window.get("address", ""))
+        if not ADDRESS.fullmatch(address):
+            return GLib.SOURCE_CONTINUE
+        title = str(window.get("title", ""))
+        cached = self.scan_cache.get(address)
+        if cached is None or cached[0] != title:
+            detected = window_requires_privacy(window)
+            self.scan_cache[address] = (title, detected)
+        else:
+            detected = cached[1]
+        if detected is True:
+            self.protect(
+                address,
+                gmx=bool(
+                    ZEN_CLASS.fullmatch(str(window.get("class", "")))
+                    and GMX_TITLE.search(normalize_title(title))
+                ),
+            )
+            return GLib.SOURCE_CONTINUE
+        record = self.protected.get(address)
+        if record is None or record.get("manual"):
+            return GLib.SOURCE_CONTINUE
+        if detected is None:
+            return GLib.SOURCE_CONTINUE
+        record["misses"] = int(record.get("misses", 0)) + 1
+        if record["misses"] >= CLEAR_AFTER_MISSES:
+            self.clear(address)
+        else:
+            self.save_state()
+        return GLib.SOURCE_CONTINUE
+
+    def stop(self, *_: Any) -> None:
+        self.loop.quit()
+
+    def run(self) -> int:
+        self.save_state()
+        self.focus_listener = Atspi.EventListener.new(
+            self.focused_private_event,
+            None,
+        )
+        self.focus_listener.register("object:state-changed:focused")
+        self.document_listener = Atspi.EventListener.new(
+            self.document_loaded_event,
+            None,
+        )
+        self.document_listener.register("document:load-complete")
+        self.showing_listener = Atspi.EventListener.new(
+            self.showing_changed_event,
+            None,
+        )
+        self.showing_listener.register("object:state-changed:showing")
+        self.tab_listener = Atspi.EventListener.new(
+            self.browser_tab_selected_event,
+            None,
+        )
+        self.tab_listener.register("object:state-changed:selected")
+        self.connect_hypr_events()
+        GLib.timeout_add(POLL_INTERVAL_MS, self.reconcile)
+        signal.signal(signal.SIGTERM, self.stop)
+        signal.signal(signal.SIGINT, self.stop)
+        try:
+            self.loop.run()
+        finally:
+            if self.focus_listener is not None:
+                self.focus_listener.deregister(
+                    "object:state-changed:focused"
+                )
+            if self.document_listener is not None:
+                self.document_listener.deregister("document:load-complete")
+            if self.showing_listener is not None:
+                self.showing_listener.deregister(
+                    "object:state-changed:showing"
+                )
+            if self.tab_listener is not None:
+                self.tab_listener.deregister(
+                    "object:state-changed:selected"
+                )
+            if self.hypr_event_source is not None:
+                GLib.source_remove(self.hypr_event_source)
+                self.hypr_event_source = None
+            if self.hypr_event_socket is not None:
+                self.hypr_event_socket.close()
+                self.hypr_event_socket = None
+            self.clear_all(announce=False)
+            if not self.protected:
+                try:
+                    STATE_PATH.unlink()
+                except FileNotFoundError:
+                    pass
+        return 0
+
+
+def send_command(command: str) -> int:
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        daemon_pid = int(payload.get("daemonPid", 0))
+        os.kill(daemon_pid, 0)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        print("Payment-Privacy-Daemon läuft nicht.", file=sys.stderr)
+        return 1
+    atomic_json(
+        COMMAND_PATH,
+        {"command": command, "requestedAt": int(time.time() * 1000)},
+    )
+    return 0
+
+
+def print_status() -> int:
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        print("inactive")
+        return 1
+    protected = payload.get("protected", {})
+    if not protected:
+        print("active: monitoring, no protected windows")
+        return 0
+    manual = sum(
+        1 for record in protected.values()
+        if isinstance(record, dict) and record.get("manual")
+    )
+    print(
+        f"active: {len(protected)} protected window(s), "
+        f"{manual} manual"
+    )
+    return 0
+
+
+def self_test() -> int:
+    class FakeAccessible:
+        def __init__(
+            self,
+            name: str,
+            attributes: dict[str, str] | None = None,
+            role: str = "entry",
+            children: list["FakeAccessible"] | None = None,
+        ) -> None:
+            self.name = name
+            self.attributes = attributes or {}
+            self.role = role
+            self.children = children or []
+
+        def get_role_name(self) -> str:
+            return self.role
+
+        def get_name(self) -> str:
+            return self.name
+
+        def get_description(self) -> str:
+            return ""
+
+        def get_attributes(self) -> dict[str, str]:
+            return self.attributes
+
+        def get_child_count(self) -> int:
+            return len(self.children)
+
+        def get_child_at_index(self, index: int) -> "FakeAccessible":
+            return self.children[index]
+
+    class FakeDocument:
+        def __init__(
+            self,
+            url: str,
+            children: list[FakeAccessible] | None = None,
+        ) -> None:
+            self.url = url
+            self.children = children or []
+
+        def get_document_attribute_value(self, _: str) -> str:
+            return self.url
+
+        def get_child_count(self) -> int:
+            return len(self.children)
+
+        def get_child_at_index(self, index: int) -> FakeControl:
+            return self.children[index]
+
+    positive = (
+        "Card number",
+        "Kreditkartennummer",
+        "CVC security code",
+        "IBAN",
+        "Gültig bis",
+        "Payment method",
+        "PayPal",
+    )
+    negative = (
+        "Search",
+        "Username",
+        "Shipping address",
+        "Post a comment",
+        "Gift card gallery",
+    )
+    for value in positive:
+        if not PAYMENT_TERMS.search(value):
+            raise AssertionError(f"expected payment term: {value}")
+    for value in negative:
+        if PAYMENT_TERMS.search(value):
+            raise AssertionError(f"unexpected payment term: {value}")
+    for value in ("cc-number", "section-checkout cc-csc", "cc-exp-year"):
+        if not PAYMENT_AUTOCOMPLETE.search(value):
+            raise AssertionError(f"expected autocomplete token: {value}")
+    for value in (
+        "email",
+        "section-profile street-address",
+        "current-password",
+        "bday",
+    ):
+        if not PRIVATE_AUTOCOMPLETE.search(value):
+            raise AssertionError(f"expected private autocomplete token: {value}")
+    for value in ("gmx.de", "www.gmx.net", "navigator.gmx.net"):
+        if not GMX_HOST.fullmatch(value):
+            raise AssertionError(f"expected GMX host: {value}")
+    for value in ("notgmx.de", "gmx.example.com", "example.net"):
+        if GMX_HOST.fullmatch(value):
+            raise AssertionError(f"unexpected GMX host: {value}")
+    for value in ("GMX FreeMail — Zen Browser", "Posteingang | GMX"):
+        if not GMX_TITLE.search(normalize_title(value)):
+            raise AssertionError(f"expected GMX title: {value}")
+    for value in ("Example Mail — Zen Browser", "GMXylophon"):
+        if GMX_TITLE.search(normalize_title(value)):
+            raise AssertionError(f"unexpected GMX title: {value}")
+    private_windows = (
+        {"class": "Bitwarden", "title": "Bitwarden"},
+        {"class": "org.kde.systemsettings", "title": "System Settings"},
+        {"class": "codex-desktop", "title": "Settings — ChatGPT"},
+        {"class": "discord", "title": "Einstellungen"},
+    )
+    public_windows = (
+        {"class": "zen", "title": "Settings guide — Zen Browser"},
+        {"class": "discord", "title": "Talking about settings - Discord"},
+        {"class": "kitty", "title": "shell"},
+    )
+    for window in private_windows:
+        if not window_metadata_requires_privacy(window):
+            raise AssertionError(f"expected private window: {window}")
+    for window in public_windows:
+        if window_metadata_requires_privacy(window):
+            raise AssertionError(f"unexpected private window: {window}")
+    positive_urls = (
+        "https://www.gmx.net/mail",
+        "https://example.com/settings/profile",
+        "https://shop.example/checkout",
+        "https://account.example/personal-info",
+        "https://shop.example/payment-methods",
+        "https://shop.example/orders/1234",
+        "https://chatgpt.com/#settings/Subscription",
+        "https://chatgpt.com/#settings/Billing",
+        "about:logins",
+        "about:preferences",
+    )
+    negative_urls = (
+        "https://example.com/",
+        "https://example.com/news/accounting",
+        "about:newtab",
+    )
+    for value in positive_urls:
+        if not url_requires_privacy(value):
+            raise AssertionError(f"expected private URL: {value}")
+    for value in negative_urls:
+        if url_requires_privacy(value):
+            raise AssertionError(f"unexpected private URL: {value}")
+    if document_requires_privacy(
+        FakeDocument("https://mail.gmx.net/mail")
+    ) is not True:
+        raise AssertionError("GMX document was not protected")
+    if document_requires_privacy(
+        FakeDocument(
+            "https://example.com/form",
+            [FakeAccessible("Email address", {"autocomplete": "email"})],
+        )
+    ) is not True:
+        raise AssertionError("private form control was not protected")
+    if document_requires_privacy(
+        FakeDocument(
+            "https://example.com/",
+            [FakeAccessible("Search", {"autocomplete": "off"})],
+        )
+    ) is not False:
+        raise AssertionError("public search control was unexpectedly protected")
+    if document_requires_privacy(
+        FakeDocument(
+            "https://chatgpt.com/",
+            [
+                FakeAccessible(
+                    "",
+                    role="dialog",
+                    children=[
+                        FakeAccessible("Settings", role="heading"),
+                        FakeAccessible("Billing", role="page tab"),
+                    ],
+                )
+            ],
+        )
+    ) is not True:
+        raise AssertionError("ChatGPT billing dialog was not protected")
+    if document_requires_privacy(
+        FakeDocument(
+            "https://chatgpt.com/",
+            [FakeAccessible("Billing", role="page tab")],
+        )
+    ) is not True:
+        raise AssertionError("ChatGPT billing tab was not protected")
+    if document_requires_privacy(
+        FakeDocument(
+            "https://chatgpt.com/",
+            [FakeAccessible("Tell me about billing", role="paragraph")],
+        )
+    ) is not False:
+        raise AssertionError("ChatGPT conversation text triggered protection")
+    if frame_requires_privacy(
+        FakeAccessible(
+            "ChatGPT",
+            role="frame",
+            children=[
+                FakeAccessible(
+                    "",
+                    role="dialog",
+                    children=[FakeAccessible("Settings", role="heading")],
+                )
+            ],
+        )
+    ) is not True:
+        raise AssertionError("native settings dialog was not protected")
+    if frame_requires_privacy(
+        FakeAccessible(
+            "Chat",
+            role="frame",
+            children=[
+                FakeAccessible("Tell me about settings", role="paragraph")
+            ],
+        )
+    ) is not False:
+        raise AssertionError("native conversation text triggered protection")
+    print("private page detector self-test: ok")
+    return 0
+
+
+def probe() -> int:
+    window = active_window()
+    if not window:
+        print("unknown: no active window")
+        return 2
+    detected = window_requires_privacy(window)
+    if detected is None:
+        print("unknown: active window accessibility tree unavailable")
+        return 2
+    print("private-page" if detected else "clear")
+    return 0 if detected else 1
+
+
+def main() -> int:
+    command = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if command == "daemon":
+        return PrivacyDaemon().run()
+    if command in {"toggle", "clear", "clear-manual"}:
+        return send_command(command)
+    if command == "status":
+        return print_status()
+    if command == "probe":
+        return probe()
+    if command == "self-test":
+        return self_test()
+    print(
+        "usage: payment-stream-privacy "
+        "{daemon|toggle|clear|clear-manual|status|probe|self-test}",
+        file=sys.stderr,
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

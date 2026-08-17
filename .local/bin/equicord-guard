@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# Discord's host updater drops a fresh app-<version> into ~/.config/discord and
+# repoints the Discord symlink at it, silently discarding the Equicord patch.
+# This repairs the live build and any newer one Discord has already staged.
+#
+#   equicord-guard            check and repair
+#   equicord-guard --quiet    log only, no stdout (systemd timer)
+#   equicord-guard --restart  also restart Discord when it runs unpatched
+#   equicord-guard --status   report state, change nothing
+
+set -euo pipefail
+
+readonly EQUICORD_ROOT="${EQUICORD_ROOT:-${HOME}/System/Equicord}"
+readonly CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+readonly STATE_HOME="${XDG_STATE_HOME:-${HOME}/.local/state}"
+
+readonly DISCORD_CONFIG="${CONFIG_HOME}/discord"
+readonly DISCORD_HOST="${DISCORD_CONFIG}/Discord"
+readonly INSTALLER="${EQUICORD_ROOT}/dist/Installer/EquilotlCli-linux"
+readonly PAYLOAD="${EQUICORD_ROOT}/dist/desktop"
+readonly PACKAGED="/usr/share/equicord"
+readonly STATE_DIR="${STATE_HOME}/equicord"
+readonly LOG_FILE="${STATE_DIR}/guard.log"
+readonly LOCK_FILE="${STATE_DIR}/guard.lock"
+readonly ENTRYPOINT="require(\"${PAYLOAD}\")"
+
+mkdir -p "${STATE_DIR}"
+
+# Before argument parsing, so the re-exec still carries them.
+if [[ -z ${EQUICORD_GUARD_LOCKED:-} ]]; then
+    export EQUICORD_GUARD_LOCKED=1
+    exec flock -w 60 "${LOCK_FILE}" "$0" "$@"
+fi
+
+quiet=false
+status_only=false
+restart=false
+[[ ${EQUICORD_GUARD_AUTORESTART:-0} == 1 ]] && restart=true
+
+while (($#)); do
+    case "$1" in
+        --quiet) quiet=true ;;
+        --restart) restart=true ;;
+        --no-restart) restart=false ;;
+        --status) status_only=true ;;
+        -h | --help)
+            sed -n '2,9p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            printf 'equicord-guard: unknown option %s\n' "$1" >&2
+            exit 64
+            ;;
+    esac
+    shift
+done
+
+log() {
+    printf '%s %s\n' "$(date -Is)" "$*" >>"${LOG_FILE}"
+    "${quiet}" || printf '%s\n' "$*"
+}
+
+notify() {
+    command -v notify-send >/dev/null 2>&1 || return 0
+    notify-send -a Equicord -i equicord "$1" "${2:-}" 2>/dev/null || true
+}
+
+resolve_live() {
+    [[ -e ${DISCORD_HOST} ]] || return 0
+    dirname -- "$(readlink -f -- "${DISCORD_HOST}")"
+}
+
+# The live build plus any newer one, which is an update Discord downloaded but
+# has not switched to yet — patching it now means the switch never lands unmodded.
+discover_builds() {
+    local live live_version="" dir version newest
+
+    live="$(resolve_live)"
+    if [[ -n ${live} ]]; then
+        live_version="${live##*/app-}"
+        [[ -f ${live}/resources/app.asar ]] && printf '%s\n' "${live}"
+    fi
+
+    for dir in "${DISCORD_CONFIG}"/app-*/; do
+        dir="${dir%/}"
+        [[ -f ${dir}/resources/app.asar ]] || continue
+        [[ ${dir} == "${live}" ]] && continue
+        version="${dir##*/app-}"
+        if [[ -n ${live_version} ]]; then
+            newest="$(printf '%s\n%s\n' "${live_version}" "${version}" | sort -V | tail -1)"
+            [[ ${newest} == "${version}" ]] || continue
+        fi
+        printf '%s\n' "${dir}"
+    done
+}
+
+dev_payload_ready() {
+    [[ -x ${INSTALLER} && -f ${PAYLOAD}/patcher.js ]]
+}
+
+is_dev_patched() {
+    grep -aFq "${ENTRYPOINT}" "$1/resources/app.asar"
+}
+
+is_pkg_patched() {
+    [[ -f $1/resources/equicord.asar && -f $1/resources/_app.asar ]]
+}
+
+# Any patch replaces the ~3.6 MB app.asar with a stub that requires the payload.
+is_stub_patched() {
+    [[ -f $1/resources/_app.asar ]] &&
+        (($(stat -c %s -- "$1/resources/app.asar") < 65536))
+}
+
+is_patched() {
+    if dev_payload_ready; then
+        is_dev_patched "$1"
+    else
+        is_stub_patched "$1"
+    fi
+}
+
+# Patching on top of a foreign stub would move that stub to _app.asar and lose
+# the pristine app.asar for good, so undo the old patch first.
+normalize_build() {
+    local resources="$1/resources"
+
+    if (($(stat -c %s -- "${resources}/app.asar") >= 65536)); then
+        return 0
+    fi
+    if [[ ! -f ${resources}/_app.asar ]] ||
+        (($(stat -c %s -- "${resources}/_app.asar") < 1048576)); then
+        log "ERROR: ${1##*/} has no pristine app.asar left, reinstall Discord"
+        return 1
+    fi
+    mv -f -- "${resources}/_app.asar" "${resources}/app.asar"
+    rm -f -- "${resources}/equicord.asar"
+}
+
+patch_dev() {
+    local dir="$1" output status=0
+
+    output="$(
+        EQUICORD_USER_DATA_DIR="${EQUICORD_ROOT}" \
+            EQUICORD_DIRECTORY="${PAYLOAD}" \
+            EQUICORD_DEV_INSTALL=1 \
+            "${INSTALLER}" -install -location "${dir}" 2>&1
+    )" || status=$?
+
+    printf '%s\n' "${output}" >>"${LOG_FILE}"
+    ((status == 0)) && is_dev_patched "${dir}"
+}
+
+# Mirrors /usr/bin/equicord, used only when the dev build is unavailable.
+patch_pkg() {
+    local resources="$1/resources"
+
+    compgen -G "${PACKAGED}/*.asar" >/dev/null || return 1
+    [[ -f ${resources}/_app.asar ]] || mv -- "${resources}/app.asar" "${resources}/_app.asar"
+    cp -- "${PACKAGED}"/*.asar "${resources}/"
+}
+
+main_discord_pids() {
+    ps -eo pid=,args= |
+        awk -v executable="$1" '$2 == executable && $0 !~ / --type=/ { print $1 }'
+}
+
+mapfile -t builds < <(discover_builds)
+
+if ((${#builds[@]} == 0)); then
+    log "no Discord build under ${DISCORD_CONFIG}, nothing to guard"
+    exit 0
+fi
+
+if "${status_only}"; then
+    if dev_payload_ready; then
+        log "payload: dev build at ${PAYLOAD}"
+    else
+        log "payload: packaged ${PACKAGED} (dev build unavailable)"
+    fi
+    for build in "${builds[@]}"; do
+        if is_dev_patched "${build}"; then
+            log "${build##*/}: patched (dev)"
+        elif is_pkg_patched "${build}"; then
+            log "${build##*/}: patched (packaged)"
+        elif is_stub_patched "${build}"; then
+            log "${build##*/}: patched (foreign payload)"
+        else
+            log "${build##*/}: UNPATCHED"
+        fi
+    done
+    exit 0
+fi
+
+dev_payload_ready || log "warning: dev payload missing at ${PAYLOAD}, using ${PACKAGED}"
+
+repaired=()
+for build in "${builds[@]}"; do
+    is_patched "${build}" && continue
+    log "repairing ${build##*/}"
+
+    if ! normalize_build "${build}"; then
+        notify "Equicord konnte nicht installiert werden" "${build##*/} — siehe ${LOG_FILE}"
+        continue
+    fi
+
+    if dev_payload_ready && patch_dev "${build}"; then
+        repaired+=("${build}")
+        log "repaired ${build##*/} with dev build"
+        continue
+    fi
+    dev_payload_ready && log "dev install failed for ${build##*/}, falling back to ${PACKAGED}"
+
+    if patch_pkg "${build}"; then
+        repaired+=("${build}")
+        log "repaired ${build##*/} with packaged asar"
+    else
+        log "ERROR: could not patch ${build##*/}"
+        notify "Equicord konnte nicht installiert werden" "${build##*/} — siehe ${LOG_FILE}"
+    fi
+done
+
+((${#repaired[@]})) || exit 0
+
+live="$(resolve_live)"
+live_repaired=false
+for build in "${repaired[@]}"; do
+    [[ ${build} == "${live}" ]] && live_repaired=true
+done
+
+# Only a pending build was patched, so whatever runs now is untouched.
+if ! "${live_repaired}"; then
+    notify "Equicord vorbereitet" "Ausstehendes Discord-Update gepatcht: ${repaired[0]##*/}"
+    exit 0
+fi
+
+mapfile -t running < <(main_discord_pids "${live}/Discord")
+
+if ((${#running[@]} == 0)); then
+    notify "Equicord neu installiert" "${live##*/} war nach einem Discord-Update ungepatcht."
+    exit 0
+fi
+
+if ! "${restart}"; then
+    log "Discord runs unpatched, restart it to load Equicord"
+    notify "Equicord neu installiert" "Discord neu starten, damit ${live##*/} gepatcht läuft."
+    exit 0
+fi
+
+log "restarting Discord (${running[*]})"
+
+# Taken from the dying process: a timer-run guard has no WAYLAND_DISPLAY of its
+# own, and Discord would come up windowless.
+mapfile -d '' -t argv <"/proc/${running[0]}/cmdline" 2>/dev/null || argv=()
+mapfile -d '' -t envv <"/proc/${running[0]}/environ" 2>/dev/null || envv=()
+
+kill -TERM "${running[@]}" 2>/dev/null || true
+
+still_running=true
+for _ in {1..40}; do
+    still_running=false
+    for pid in "${running[@]}"; do
+        kill -0 "${pid}" 2>/dev/null && still_running=true
+    done
+    "${still_running}" || break
+    sleep 0.25
+done
+"${still_running}" && kill -KILL "${running[@]}" 2>/dev/null
+
+setsid env -i "${envv[@]}" "${HOME}/.local/bin/equicord-bridge" "${argv[@]:1}" \
+    >/dev/null 2>&1 &
+disown
+notify "Equicord neu installiert" "Discord wurde neu gestartet."

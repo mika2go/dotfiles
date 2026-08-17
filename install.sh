@@ -12,6 +12,7 @@ WITH_SDDM=false
 CHECK_ONLY=false
 
 USER_ITEMS=(
+    ".config/brrtfetch"
     ".config/fastfetch"
     ".config/gtk-3.0"
     ".config/gtk-4.0"
@@ -23,14 +24,25 @@ USER_ITEMS=(
     ".config/spicetify/scripts"
     ".config/systemd/user/xdg-desktop-portal-hyprland.service.d/20-dark-qt.conf"
     ".config/systemd/user/xdg-desktop-portal.service.d/10-hyprland-backends.conf"
+    ".config/systemd/user/payment-stream-privacy.service"
+    ".config/systemd/user/equicord-guard.service"
+    ".config/systemd/user/equicord-guard.timer"
     ".config/waybar"
     ".config/wireplumber"
+    ".local/bin/brrt"
+    ".local/bin/discord"
+    ".local/bin/equicord"
+    ".local/bin/equicord-bridge"
+    ".local/bin/equicord-guard"
+    ".local/bin/payment-stream-privacy"
     ".local/share/applications/discord.desktop"
+    ".local/share/applications/equicord.desktop"
     ".local/share/icons/default/index.theme"
 )
 
 REQUIRED_COMMANDS=(
     Hyprland
+    hyprctl
     qs
     awww
     kitty
@@ -41,6 +53,7 @@ REQUIRED_COMMANDS=(
 )
 
 OPTIONAL_COMMANDS=(
+    brrtfetch
     fastfetch
     ffmpeg
     hypridle
@@ -92,6 +105,14 @@ check_commands() {
             missing=1
         fi
     done
+    if python3 -c \
+            'import gi; gi.require_version("Atspi", "2.0")' \
+            >/dev/null 2>&1; then
+        log "OK      python3-gi/Atspi"
+    else
+        log "MISSING python3-gi/Atspi"
+        missing=1
+    fi
 
     printf '\nOptional integrations:\n'
     for command_name in "${OPTIONAL_COMMANDS[@]}"; do
@@ -239,6 +260,13 @@ fi
 
 if ! "${DRY_RUN}"; then
     systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user enable payment-stream-privacy.service >/dev/null 2>&1 || true
+    systemctl --user enable --now equicord-guard.timer >/dev/null 2>&1 || true
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+        systemctl --user restart payment-stream-privacy.service
+    fi
+    update-desktop-database "${TARGET_HOME}/.local/share/applications" \
+        >/dev/null 2>&1 || true
 fi
 
 printf '\nDone.\n'
