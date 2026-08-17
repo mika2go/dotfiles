@@ -11,6 +11,12 @@
 # Generated theme state
 /.config/spicetify/Themes/RiceBlur/assets/wallpaper-current.jpg
 
+# Private calendar subscription URLs used by the workspace-one hub
+/.config/quickshell/calendar.json
+
+# Personal wallpaper library
+/.config/hypr/wallpapers/
+
 # Old Fastfetch artwork revisions
 /.config/fastfetch/logo.before-rei.png
 /.config/fastfetch/logo.previous.png
